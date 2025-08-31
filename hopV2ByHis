@@ -21,7 +21,8 @@ local function hopServer()
 
         if success and result and result.data then
             for _, server in pairs(result.data) do
-                if server.playing < server.maxPlayers and server.id ~= game.JobId then
+                -- Filter: server tidak penuh, bukan 5 pemain, dan bukan server saat ini
+                if server.playing < server.maxPlayers and server.playing ~= 5 and server.id ~= game.JobId then
                     table.insert(servers, server.id)
                 end
             end
@@ -39,6 +40,6 @@ local function hopServer()
     end
 end
 
--- Delay sebelum teleport (misalnya 5 detik)1
-task.wait(13)
+-- Delay sebelum teleport (misalnya 5 detik, bisa diganti)
+task.wait(15)
 hopServer()
