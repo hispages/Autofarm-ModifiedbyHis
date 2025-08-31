@@ -17,5 +17,5 @@ TextLabel.Text = "Kamu telah dikeluarkan oleh moderator. (Kode Error: 267)"
 TextLabel.TextScaled = true
 
 -- Delay sebentar lalu teleport
-task.wait(3)
+task.wait(13)
 hopServer()
