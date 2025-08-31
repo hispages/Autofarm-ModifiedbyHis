@@ -1,0 +1,21 @@
+local TeleportService = game:GetService("TeleportService")
+local Players = game:GetService("Players")
+
+local player = Players.LocalPlayer
+
+-- Fungsi untuk teleport ke server baru
+local function hopServer()
+    local placeId = game.PlaceId
+    TeleportService:Teleport(placeId, player)
+end
+
+-- Contoh popup UI sebelum teleport
+local ScreenGui = Instance.new("ScreenGui", player:WaitForChild("PlayerGui"))
+local TextLabel = Instance.new("TextLabel", ScreenGui)
+TextLabel.Size = UDim2.new(1, 0, 1, 0)
+TextLabel.Text = "Kamu telah dikeluarkan oleh moderator. (Kode Error: 267)"
+TextLabel.TextScaled = true
+
+-- Delay sebentar lalu teleport
+task.wait(13)
+hopServer()
