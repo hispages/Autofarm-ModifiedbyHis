@@ -1,0 +1,410 @@
+-- SERVER HOPPING SYSTEM UNTUK HORROR SURVIVAL GAME (99 Nights Style)
+-- Optimized untuk game horror dengan survival mechanics
+
+local TeleportService = game:GetService("TeleportService")
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local ServerHopModule = {}
+
+-- Konfigurasi khusus untuk Horror Survival Game
+local PLACE_ID = game.PlaceId
+local MAX_PLAYERS_PER_SERVER = 5 -- Optimal untuk horror atmosphere
+local MIN_PLAYERS_FOR_HOP = 1 -- Horror games better with some players
+local COOLDOWN_TIME = 10 -- Longer cooldown untuk prevent abuse
+local NIGHT_CYCLE_TIME = 600 -- 10 menit per night cycle
+
+-- Game State Variables
+local gameStates = {
+    DAY = "Day",
+    NIGHT = "Night", 
+    PREPARING = "Preparing"
+}
+
+local currentGameState = gameStates.PREPARING
+local currentNight = 1
+local survivorsCount = 0
+local isEventActive = false
+
+-- Server Quality Metrics
+local serverMetrics = {
+    ping = 0,
+    playerCount = 0,
+    nightPhase = 1,
+    survivalRate = 100,
+    eventActive = false
+}
+
+-- Function untuk mendapatkan server list dengan filter horror game specific
+function ServerHopModule:GetHorrorServerList()
+    local success, result = pcall(function()
+        local url = "https://games.roblox.com/v1/games/" .. PLACE_ID .. "/servers/Public?sortOrder=Desc&limit=100"
+        local response = HttpService:GetAsync(url)
+        return HttpService:JSONDecode(response)
+    end)
+    
+    if success then
+        return result.data
+    else
+        warn("Failed to get server list: " .. tostring(result))
+        return nil
+    end
+end
+
+-- Function untuk filter server berdasarkan kriteria horror game
+function ServerHopModule:FilterHorrorServers(serverList, preferenceType)
+    local suitableServers = {}
+    
+    for _, server in pairs(serverList) do
+        local isValid = server.playing >= MIN_PLAYERS_FOR_HOP and 
+                       server.playing <= MAX_PLAYERS_PER_SERVER and 
+                       server.id ~= game.JobId
+        
+        if isValid then
+            -- Calculate server "score" based on horror game needs
+            local serverScore = 0
+            
+            if preferenceType == "SURVIVAL" then
+                -- Prefer servers with moderate players for better survival experience
+                if server.playing >= 4 and server.playing <= 6 then
+                    serverScore = serverScore + 10
+                end
+            elseif preferenceType == "SOLO" then
+                -- Prefer servers with fewer players for solo experience
+                if server.playing <= 3 then
+                    serverScore = serverScore + 10
+                end
+            elseif preferenceType == "TEAM" then
+                -- Prefer servers with more players for team play
+                if server.playing >= 5 then
+                    serverScore = serverScore + 10
+                end
+            elseif preferenceType == "FRESH" then
+                -- Prefer servers that might be in early nights
+                -- This is estimated based on player count stability
+                serverScore = serverScore + math.random(1, 10)
+            end
+            
+            table.insert(suitableServers, {
+                server = server,
+                score = serverScore
+            })
+        end
+    end
+    
+    -- Sort by score (highest first)
+    table.sort(suitableServers, function(a, b)
+        return a.score > b.score
+    end)
+    
+    return suitableServers
+end
+
+-- Function untuk hop berdasarkan survival preference
+function ServerHopModule:HopForSurvival(player, survivalType)
+    local currentTime = tick()
+    local playerId = player.UserId
+    
+    -- Check cooldown
+    if self.hopCooldowns and self.hopCooldowns[playerId] then
+        local remainingCooldown = COOLDOWN_TIME - (currentTime - self.hopCooldowns[playerId])
+        if remainingCooldown > 0 then
+            self:SendNotification(player, "Cooldown: " .. math.ceil(remainingCooldown) .. "s remaining")
+            return false
+        end
+    end
+    
+    local serverList = self:GetHorrorServerList()
+    if not serverList then
+        self:SendNotification(player, "Cannot access server list")
+        return false
+    end
+    
+    local filteredServers = self:FilterHorrorServers(serverList, survivalType)
+    
+    if #filteredServers > 0 then
+        local targetServer = filteredServers[1].server
+        
+        -- Set cooldown
+        if not self.hopCooldowns then self.hopCooldowns = {} end
+        self.hopCooldowns[playerId] = currentTime
+        
+        -- Log the hop
+        print(string.format("%s hopping to %s server [%d players]", 
+                           player.Name, survivalType, targetServer.playing))
+        
+        -- Send notification before teleport
+        self:SendNotification(player, "Hopping to " .. survivalType:lower() .. " server...")
+        
+        return self:TeleportToServer(player, targetServer.id)
+    else
+        self:SendNotification(player, "No suitable " .. survivalType:lower() .. " servers found")
+        return false
+    end
+end
+
+-- Enhanced teleport function with horror game considerations
+function ServerHopModule:TeleportToServer(player, serverId)
+    local success, errorMsg = pcall(function()
+        -- Save player data before teleport (important for survival games)
+        self:SavePlayerData(player)
+        
+        local teleportOptions = Instance.new("TeleportOptions")
+        teleportOptions.ShouldReserveServer = false
+        
+        if serverId then
+            TeleportService:TeleportToPlaceInstance(PLACE_ID, serverId, player, teleportOptions)
+        else
+            TeleportService:Teleport(PLACE_ID, player, teleportOptions)
+        end
+    end)
+    
+    if not success then
+        warn("Teleport failed for " .. player.Name .. ": " .. tostring(errorMsg))
+        self:SendNotification(player, "Teleport failed: " .. tostring(errorMsg))
+        return false
+    end
+    
+    return true
+end
+
+-- Function to save player data before server hop
+function ServerHopModule:SavePlayerData(player)
+    -- Implementation depends on your data saving system
+    -- This is where you'd save survival stats, inventory, etc.
+    local leaderstats = player:FindFirstChild("leaderstats")
+    if leaderstats then
+        local survivalTime = leaderstats:FindFirstChild("SurvivalTime")
+        local nightsSurvived = leaderstats:FindFirstChild("NightsSurvived")
+        -- Save these values to datastore
+    end
+end
+
+-- Function to send notifications to player
+function ServerHopModule:SendNotification(player, message)
+    local remoteEvent = ReplicatedStorage:FindFirstChild("NotificationEvent")
+    if remoteEvent then
+        remoteEvent:FireClient(player, message)
+    else
+        -- Fallback to chat message
+        local chatService = game:GetService("Chat")
+        if chatService then
+            chatService:Chat(player.Character and player.Character:FindFirstChild("Head"), 
+                           "[SERVER] " .. message, Enum.ChatColor.Yellow)
+        end
+    end
+end
+
+-- Create horror-themed GUI for server hopping
+function ServerHopModule:CreateHorrorServerGUI(player)
+    local playerGui = player:WaitForChild("PlayerGui")
+    
+    -- Remove existing GUI if present
+    local existingGUI = playerGui:FindFirstChild("HorrorServerHopGUI")
+    if existingGUI then existingGUI:Destroy() end
+    
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "HorrorServerHopGUI"
+    screenGui.Parent = playerGui
+    
+    -- Main frame with horror theme
+    local mainFrame = Instance.new("Frame")
+    mainFrame.Name = "MainFrame"
+    mainFrame.Size = UDim2.new(0, 320, 0, 280)
+    mainFrame.Position = UDim2.new(1, -340, 0.5, -140)
+    mainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+    mainFrame.BorderColor3 = Color3.fromRGB(100, 0, 0)
+    mainFrame.BorderSizePixel = 2
+    mainFrame.Parent = screenGui
+    
+    -- Corner styling
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = mainFrame
+    
+    -- Title with horror font
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Size = UDim2.new(1, 0, 0, 40)
+    titleLabel.Position = UDim2.new(0, 0, 0, 0)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.Text = "🌙 NIGHT SERVER HOP 🌙"
+    titleLabel.TextColor3 = Color3.fromRGB(200, 50, 50)
+    titleLabel.TextScaled = true
+    titleLabel.Font = Enum.Font.CreepsterDisplay
+    titleLabel.Parent = mainFrame
+    
+    -- Server info display
+    local infoFrame = Instance.new("Frame")
+    infoFrame.Size = UDim2.new(0.9, 0, 0, 60)
+    infoFrame.Position = UDim2.new(0.05, 0, 0, 45)
+    infoFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+    infoFrame.Parent = mainFrame
+    
+    local infoCorner = Instance.new("UICorner")
+    infoCorner.CornerRadius = UDim.new(0, 5)
+    infoCorner.Parent = infoFrame
+    
+    local currentServerInfo = Instance.new("TextLabel")
+    currentServerInfo.Size = UDim2.new(1, 0, 1, 0)
+    currentServerInfo.BackgroundTransparency = 1
+    currentServerInfo.Text = "Current: " .. #Players:GetPlayers() .. " survivors"
+    currentServerInfo.TextColor3 = Color3.fromRGB(255, 200, 100)
+    currentServerInfo.TextScaled = true
+    currentServerInfo.Font = Enum.Font.SourceSans
+    currentServerInfo.Parent = infoFrame
+    
+    -- Survival mode buttons
+    local buttonConfigs = {
+        {name = "Solo Survival", color = Color3.fromRGB(80, 0, 120), type = "SOLO", pos = 110},
+        {name = "Team Survival", color = Color3.fromRGB(0, 80, 120), type = "TEAM", pos = 150},
+        {name = "Balanced Server", color = Color3.fromRGB(120, 80, 0), type = "SURVIVAL", pos = 190},
+        {name = "Fresh Start", color = Color3.fromRGB(0, 120, 0), type = "FRESH", pos = 230}
+    }
+    
+    for _, config in pairs(buttonConfigs) do
+        local button = Instance.new("TextButton")
+        button.Size = UDim2.new(0.9, 0, 0, 30)
+        button.Position = UDim2.new(0.05, 0, 0, config.pos)
+        button.BackgroundColor3 = config.color
+        button.Text = config.name
+        button.TextColor3 = Color3.fromRGB(255, 255, 255)
+        button.TextScaled = true
+        button.Font = Enum.Font.SourceSansBold
+        button.Parent = mainFrame
+        
+        local buttonCorner = Instance.new("UICorner")
+        buttonCorner.CornerRadius = UDim.new(0, 5)
+        buttonCorner.Parent = button
+        
+        -- Button hover effect
+        button.MouseEnter:Connect(function()
+            button.BackgroundColor3 = Color3.new(
+                math.min(config.color.R + 0.2, 1),
+                math.min(config.color.G + 0.2, 1),
+                math.min(config.color.B + 0.2, 1)
+            )
+        end)
+        
+        button.MouseLeave:Connect(function()
+            button.BackgroundColor3 = config.color
+        end)
+        
+        button.MouseButton1Click:Connect(function()
+            self:HopForSurvival(player, config.type)
+        end)
+    end
+    
+    -- Update server info periodically
+    spawn(function()
+        while screenGui.Parent do
+            wait(5)
+            if currentServerInfo and currentServerInfo.Parent then
+                local playerCount = #Players:GetPlayers()
+                local nightText = currentNight and ("Night " .. currentNight) or "Day"
+                currentServerInfo.Text = string.format("Current: %d survivors | %s", 
+                                                     playerCount, nightText)
+            end
+        end
+    end)
+end
+
+-- Auto server balance for horror games
+function ServerHopModule:AutoHorrorServerBalance()
+    local playerCount = #Players:GetPlayers()
+    
+    -- If server is too crowded for horror atmosphere
+    if playerCount > MAX_PLAYERS_PER_SERVER then
+        local playersList = Players:GetPlayers()
+        
+        -- Move newer players to maintain core group
+        table.sort(playersList, function(a, b)
+            return (a:GetJoinData().SourceGameId or 0) > (b:GetJoinData().SourceGameId or 0)
+        end)
+        
+        for i = MAX_PLAYERS_PER_SERVER + 1, #playersList do
+            local player = playersList[i]
+            if player then
+                spawn(function()
+                    wait(math.random(1, 5)) -- Staggered teleports
+                    self:HopForSurvival(player, "SURVIVAL")
+                end)
+            end
+        end
+    end
+end
+
+-- Initialize the system when player joins
+Players.PlayerAdded:Connect(function(player)
+    wait(3) -- Allow player to fully load
+    
+    ServerHopModule:CreateHorrorServerGUI(player)
+    
+    -- Auto balance if needed
+    spawn(function()
+        wait(1)
+        ServerHopModule:AutoHorrorServerBalance()
+    end)
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+    -- Cleanup
+    if ServerHopModule.hopCooldowns then
+        ServerHopModule.hopCooldowns[player.UserId] = nil
+    end
+end)
+
+-- Night cycle integration (optional)
+local function updateGameState(newState, night)
+    currentGameState = newState
+    currentNight = night or currentNight
+    
+    -- Update all player GUIs with current state
+    for _, player in pairs(Players:GetPlayers()) do
+        local gui = player.PlayerGui:FindFirstChild("HorrorServerHopGUI")
+        if gui then
+            -- Update info would go here
+        end
+    end
+end
+
+-- Admin commands for horror game management
+local function onPlayerChatted(player, message)
+    -- Check if player is admin (implement your own admin check)
+    local isAdmin = player.Name == "YourAdminName" -- Replace with your admin check
+    
+    if isAdmin then
+        local args = string.split(string.lower(message), " ")
+        local command = args[1]
+        
+        if command == "/serverinfo" then
+            local info = string.format("Server: %d/%d players | Night: %d | State: %s", 
+                                     #Players:GetPlayers(), MAX_PLAYERS_PER_SERVER, 
+                                     currentNight, currentGameState)
+            ServerHopModule:SendNotification(player, info)
+            
+        elseif command == "/forcehop" and args[2] then
+            local targetPlayer = Players:FindFirstChild(args[2])
+            if targetPlayer then
+                ServerHopModule:HopForSurvival(targetPlayer, "SURVIVAL")
+            end
+            
+        elseif command == "/setnight" and args[2] then
+            local nightNum = tonumber(args[2])
+            if nightNum then
+                updateGameState(gameStates.NIGHT, nightNum)
+                ServerHopModule:SendNotification(player, "Night set to " .. nightNum)
+            end
+        end
+    end
+end
+
+-- Connect chat events
+Players.PlayerAdded:Connect(function(player)
+    player.Chatted:Connect(function(message)
+        onPlayerChatted(player, message)
+    end)
+end)
+
+return ServerHopModule
