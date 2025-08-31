@@ -39,6 +39,6 @@ local function hopServer()
     end
 end
 
--- Delay sebelum teleport (misalnya 5 detik)
+-- Delay sebelum teleport (misalnya 5 detik)1
 task.wait(13)
 hopServer()
