@@ -1,21 +1,44 @@
 local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 
 local player = Players.LocalPlayer
+local placeId = game.PlaceId
 
--- Fungsi untuk teleport ke server baru
 local function hopServer()
-    local placeId = game.PlaceId
-    TeleportService:Teleport(placeId, player)
+    local servers = {}
+    local cursor = ""
+    local success, result
+
+    repeat
+        success, result = pcall(function()
+            return HttpService:JSONDecode(
+                game:HttpGetAsync(
+                    "https://games.roblox.com/v1/games/"..placeId.."/servers/Public?sortOrder=Asc&limit=100"..(cursor ~= "" and "&cursor="..cursor or "")
+                )
+            )
+        end)
+
+        if success and result and result.data then
+            for _, server in pairs(result.data) do
+                if server.playing < server.maxPlayers and server.id ~= game.JobId then
+                    table.insert(servers, server.id)
+                end
+            end
+            cursor = result.nextPageCursor or ""
+        else
+            break
+        end
+    until cursor == "" or #servers > 0
+
+    if #servers > 0 then
+        local randomServer = servers[math.random(1, #servers)]
+        TeleportService:TeleportToPlaceInstance(placeId, randomServer, player)
+    else
+        TeleportService:Teleport(placeId, player)
+    end
 end
 
--- Contoh popup UI sebelum teleport
-local ScreenGui = Instance.new("ScreenGui", player:WaitForChild("PlayerGui"))
-local TextLabel = Instance.new("TextLabel", ScreenGui)
-TextLabel.Size = UDim2.new(1, 0, 1, 0)
-TextLabel.Text = "Kamu telah dikeluarkan oleh moderator. (Kode Error: 267)"
-TextLabel.TextScaled = true
-
--- Delay sebentar lalu teleport
+-- Delay sebelum teleport (misalnya 5 detik)
 task.wait(13)
 hopServer()
