@@ -60,5 +60,5 @@ task.wait(15) -- delay pertama 15 detik
 while true do
     local success = hopServer()
     if success then break end
-    task.wait(5) -- kalau gagal, ulangi tiap 5 detik
+    task.wait(10) -- kalau gagal, ulangi tiap 5 detik
 end
