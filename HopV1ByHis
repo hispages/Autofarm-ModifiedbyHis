@@ -55,7 +55,7 @@ local function hopServer()
 end
 
 -- Jalankan
-task.wait(10) -- delay awal sebelum eksekusi (atur sesuai kebutuhan)
+task.wait(20) -- delay awal sebelum eksekusi (atur sesuai kebutuhan)
 
 while true do
     local success = hopServer()
