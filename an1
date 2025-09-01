@@ -1,0 +1,89 @@
+-- ServerScriptService/AntiHopServer.server.lua
+local TeleportService = game:GetService("TeleportService")
+local Players = game:GetService("Players")
+local MemoryStoreService = game:GetService("MemoryStoreService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- Konfigurasi
+local COOLDOWN_SEC = 30
+local RATE_LIMIT_WINDOW = 20    -- detik
+local RATE_LIMIT_MAX = 3        -- max request dalam window
+local PLACE_ID = game.PlaceId
+
+-- Remote untuk minta teleport (dari client)
+local Remote = ReplicatedStorage:FindFirstChild("RequestTeleport")
+if not Remote then
+    Remote = Instance.new("RemoteEvent")
+    Remote.Name = "RequestTeleport"
+    Remote.Parent = ReplicatedStorage
+end
+
+-- MemoryStore untuk rate limit per-user
+local bucket = MemoryStoreService:GetSortedMap("hop-rate-" .. tostring(PLACE_ID))
+
+local function now()
+    return os.time()
+end
+
+-- Util: tambah hit rate-limit
+local function addRateHit(userId)
+    local key = tostring(userId)
+    local t = now()
+
+    local success, err = pcall(function()
+        local current = bucket:GetAsync(key) or "[]"
+        local data = game:GetService("HttpService"):JSONDecode(current)
+        -- buang yang sudah kadaluwarsa
+        local newData = {}
+        for _, ts in ipairs(data) do
+            if t - ts < RATE_LIMIT_WINDOW then
+                table.insert(newData, ts)
+            end
+        end
+        table.insert(newData, t)
+        bucket:SetAsync(key,
+            game:GetService("HttpService"):JSONEncode(newData),
+            RATE_LIMIT_WINDOW -- TTL mendekati window
+        )
+        return #newData
+    end)
+    if success and type(success) == "number" then
+        return success
+    end
+    return nil -- jika gagal, anggap tidak melebihi
+end
+
+-- Validasi saat pemain masuk (bawa TeleportData)
+Players.PlayerAdded:Connect(function(player)
+    local data = TeleportService:GetTeleportData()
+    if data and data.LastHop then
+        local t = now()
+        local delta = t - tonumber(data.LastHop)
+        if delta < COOLDOWN_SEC then
+            player:Kick(("Anti Full Hop! Tunggu %d detik."):format(COOLDOWN_SEC - delta))
+            return
+        end
+    end
+end)
+
+-- Handler permintaan teleport dari client
+Remote.OnServerEvent:Connect(function(player, targetJobId)
+    -- Rate limit (server authoritative)
+    local hits = addRateHit(player.UserId)
+    if hits and hits > RATE_LIMIT_MAX then
+        player:Kick("Anti Full Hop! (Rate limit)")
+        return
+    end
+
+    -- Cari target server: jika client tidak kirim, tetap pakai fallback ke server baru
+    local jobId = typeof(targetJobId) == "string" and #targetJobId > 0 and targetJobId or nil
+
+    local payload = { LastHop = now() }
+
+    if jobId then
+        TeleportService:TeleportToPlaceInstance(PLACE_ID, jobId, player, payload)
+    else
+        -- fallback: teleport ke place saja (biar Roblox pilih server lain)
+        TeleportService:Teleport(PLACE_ID, player, nil, payload)
+    end
+end)

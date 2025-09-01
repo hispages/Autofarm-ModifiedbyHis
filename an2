@@ -1,0 +1,22 @@
+-- StarterPlayerScripts/HopTester.client.lua
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+
+local Remote = ReplicatedStorage:WaitForChild("RequestTeleport")
+local player = Players.LocalPlayer
+
+-- KONFIG UJI COBA
+local ENABLE_STRESS_TEST = true     -- set false kalau tidak mau test
+local INITIAL_DELAY = 3             -- detik sebelum mulai test
+local REQUESTS = 5                  -- berapa kali minta teleport
+local GAP = 2                       -- jeda antar permintaan (detik)
+-- NOTE: Jangan gunakan di public release. Ini untuk uji internal saja.
+
+task.wait(INITIAL_DELAY)
+if ENABLE_STRESS_TEST then
+    for i = 1, REQUESTS do
+        -- Tidak tentukan jobId; biar server tentukan / fallback
+        Remote:FireServer("")
+        task.wait(GAP)
+    end
+end

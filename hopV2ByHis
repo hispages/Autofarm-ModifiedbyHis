@@ -21,8 +21,9 @@ local function hopServer()
 
         if success and result and result.data then
             for _, server in pairs(result.data) do
-                -- Filter: server tidak penuh, bukan 5 pemain, dan bukan server saat ini
-                if server.playing < server.maxPlayers and server.playing ~= 5 and server.id ~= game.JobId then
+                if server.playing < server.maxPlayers 
+                and server.playing ~= 5 
+                and server.id ~= game.JobId then
                     table.insert(servers, server.id)
                 end
             end
@@ -34,12 +35,30 @@ local function hopServer()
 
     if #servers > 0 then
         local randomServer = servers[math.random(1, #servers)]
-        TeleportService:TeleportToPlaceInstance(placeId, randomServer, player)
+        local ok, err = pcall(function()
+            TeleportService:TeleportToPlaceInstance(placeId, randomServer, player)
+        end)
+        if not ok then
+            warn("[HopServer] Teleport gagal:", err)
+            return false
+        end
     else
-        TeleportService:Teleport(placeId, player)
+        local ok, err = pcall(function()
+            TeleportService:Teleport(placeId, player)
+        end)
+        if not ok then
+            warn("[HopServer] Teleport gagal:", err)
+            return false
+        end
     end
+
+    return true -- sukses (kalau tidak error di atas)
 end
 
--- Delay sebelum teleport (misalnya 5 detik, bisa diganti)
-task.wait(15)
-hopServer()
+-- Jalankan
+task.wait(15) -- delay pertama 15 detik
+while true do
+    local success = hopServer()
+    if success then break end
+    task.wait(5) -- kalau gagal, ulangi tiap 5 detik
+end
