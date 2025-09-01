@@ -5,13 +5,13 @@ local TeleportService = game:GetService("TeleportService")
 local RunService = game:GetService("RunService")
 
 -- CONFIG
-local PLACE_ID = 12345678           -- <--- ganti dengan PlaceId game target
+local PLACE_ID = 79546208627805           -- <--- ganti dengan PlaceId game target
 local ATTEMPTS_PER_SECOND = 12       -- frekuensi hop (2x/s)
 local INTERVAL = 1 / ATTEMPTS_PER_SECOND
 local START_DELAY = 10              -- <--- delay awal sebelum mulai (dalam detik)
 local LIMIT_PER_REQUEST = 100
 local MAX_CONSECUTIVE_ERRORS = 5
-local MIN_PLAYERS = 
+local MIN_PLAYERS = 0
 local MAX_PLAYERS = math.huge
 local AVOID_INSTANCES = {}
 
