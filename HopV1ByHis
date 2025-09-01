@@ -1,65 +1,64 @@
-
-
-local HttpService = game:GetService("HttpService")
 local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 
--- CONFIG
-local PLACE_ID = game.PlaceId     
-local ATTEMPTS_PER_SECOND = 12     -- frekuensi hop (2x/s)
-local INTERVAL = 1 / ATTEMPTS_PER_SECOND
-local START_DELAY = 10             -- delay awal sebelum mulai (detik)
-local LIMIT_PER_REQUEST = 100     -- max server per request (100)
+local player = Players.LocalPlayer
+local placeId = game.PlaceId
 
--- fungsi ambil daftar server publik
-local function fetch_servers(cursor)
-	local url = string.format(
-		"https://games.roblox.com/v1/games/%d/servers/Public?limit=%d",
-		PLACE_ID,
-		LIMIT_PER_REQUEST
-	)
-	if cursor and cursor ~= "" then
-		url = url .. "&cursor=" .. HttpService:UrlEncode(cursor)
-	end
+local function hopServer()
+    local servers = {}
+    local cursor = ""
+    local success, result
 
-	local success, res = pcall(function()
-		return HttpService:GetAsync(url)
-	end)
-	if not success then return nil end
-	return HttpService:JSONDecode(res)
+    repeat
+        success, result = pcall(function()
+            return HttpService:JSONDecode(
+                game:HttpGetAsync(
+                    "https://games.roblox.com/v1/games/"..placeId.."/servers/Public?sortOrder=Asc&limit=100"..(cursor ~= "" and "&cursor="..cursor or "")
+                )
+            )
+        end)
+
+        if success and result and result.data then
+            for _, server in pairs(result.data) do
+                if server.playing < server.maxPlayers 
+                and server.id ~= game.JobId then
+                    table.insert(servers, server.id)
+                end
+            end
+            cursor = result.nextPageCursor or ""
+        else
+            break
+        end
+    until cursor == "" or #servers > 0
+
+    if #servers > 0 then
+        local randomServer = servers[math.random(1, #servers)]
+        local ok, err = pcall(function()
+            TeleportService:TeleportToPlaceInstance(placeId, randomServer, player)
+        end)
+        if not ok then
+            warn("[HopServer] Teleport gagal:", err)
+            return false
+        end
+    else
+        local ok, err = pcall(function()
+            TeleportService:Teleport(placeId, player)
+        end)
+        if not ok then
+            warn("[HopServer] Teleport gagal:", err)
+            return false
+        end
+    end
+
+    return true
 end
 
--- cari server kandidat
-local function find_server()
-	local cursor = nil
-	for _ = 1, 5 do -- max 5 halaman
-		local data = fetch_servers(cursor)
-		if not data then return nil end
-
-		for _, srv in ipairs(data.data) do
-			if srv.id ~= game.JobId and srv.playing < srv.maxPlayers then
-				return srv.id
-			end
-		end
-
-		cursor = data.nextPageCursor
-		if not cursor then break end
-	end
-	return nil
-end
-
--- MAIN
-task.wait(START_DELAY)
-print("[ServerHop] Mulai mencari server...")
+-- Jalankan
+task.wait(10) -- delay awal sebelum eksekusi (atur sesuai kebutuhan)
 
 while true do
-	local instanceId = find_server()
-	if instanceId then
-		print("[ServerHop] Ketemu server baru, teleport...")
-		TeleportService:TeleportToPlaceInstance(PLACE_ID, instanceId, Players.LocalPlayer)
-		break -- setelah teleport, script berhenti
-	else
-		warn("[ServerHop] Tidak ada server, coba lagi...")
-	end
-	task.wait(INTERVAL)
+    local success = hopServer()
+    if success then break end
+    task.wait(0.08) -- frekuensi 2 percobaan per detik
 end
