@@ -1,0 +1,108 @@
+-- Server-hopper dengan delay awal
+
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
+local RunService = game:GetService("RunService")
+
+-- CONFIG
+local PLACE_ID = 12345678           -- <--- ganti dengan PlaceId game target
+local ATTEMPTS_PER_SECOND = 12       -- frekuensi hop (2x/s)
+local INTERVAL = 1 / ATTEMPTS_PER_SECOND
+local START_DELAY = 10              -- <--- delay awal sebelum mulai (dalam detik)
+local LIMIT_PER_REQUEST = 100
+local MAX_CONSECUTIVE_ERRORS = 5
+local MIN_PLAYERS = 
+local MAX_PLAYERS = math.huge
+local AVOID_INSTANCES = {}
+
+local function fetch_server_page(cursor)
+    local url = string.format("https://games.roblox.com/v1/games/%d/servers/Public?limit=%d", PLACE_ID, LIMIT_PER_REQUEST)
+    if cursor and cursor ~= "" then
+        url = url .. "&cursor=" .. HttpService:UrlEncode(cursor)
+    end
+
+    local ok, res = pcall(function()
+        return HttpService:GetAsync(url, true)
+    end)
+
+    if not ok then return nil, res end
+    return HttpService:JSONDecode(res), nil
+end
+
+local function find_candidate_instance()
+    local cursor = nil
+    for page = 1, 10 do
+        local data, err = fetch_server_page(cursor)
+        if err or not data then return nil, "fetch_error" end
+
+        if data.data and #data.data > 0 then
+            for _, srv in ipairs(data.data) do
+                local currentPlayers = srv.playing or 0
+                local maxPlayers = srv.maxPlayers or 0
+                local instanceId = srv.id
+                if currentPlayers >= MIN_PLAYERS and currentPlayers <= MAX_PLAYERS and maxPlayers > 0 then
+                    if not AVOID_INSTANCES[instanceId] and instanceId ~= tostring(game.JobId) then
+                        return instanceId, nil
+                    end
+                end
+            end
+        end
+        cursor = data.nextPageCursor
+        if not cursor or cursor == "" then break end
+    end
+    return nil, "no_candidate"
+end
+
+local function sleepSeconds(s)
+    if RunService:IsServer() then wait(s) else task.wait(s) end
+end
+
+-- MAIN
+spawn(function()
+    print("[ServerHop] Menunggu delay awal " .. START_DELAY .. " detik...")
+    sleepSeconds(START_DELAY)  -- <-- delay sebelum mulai loop
+
+    print("[ServerHop] Mulai mencari server...")
+    local consecutiveErrors = 0
+
+    while true do
+        local startTime = tick()
+        local instanceId, reason = find_candidate_instance()
+
+        if instanceId then
+            AVOID_INSTANCES[instanceId] = true
+            spawn(function()
+                sleepSeconds(30)
+                AVOID_INSTANCES[instanceId] = nil
+            end)
+
+            local ok, err = pcall(function()
+                TeleportService:TeleportToPlaceInstance(PLACE_ID, instanceId, nil)
+            end)
+
+            if not ok then
+                warn("Teleport gagal: ", err)
+                consecutiveErrors += 1
+            else
+                consecutiveErrors = 0
+            end
+        else
+            if reason == "no_candidate" then
+                consecutiveErrors += 1
+            else
+                warn("Fetch error:", reason)
+                consecutiveErrors += 1
+            end
+        end
+
+        if consecutiveErrors >= MAX_CONSECUTIVE_ERRORS then
+            local backoff = math.min(10, 2 ^ (consecutiveErrors - MAX_CONSECUTIVE_ERRORS))
+            warn("Banyak error, backoff " .. backoff .. " detik")
+            sleepSeconds(backoff)
+        end
+
+        local elapsed = tick() - startTime
+        local waitFor = INTERVAL - elapsed
+        if waitFor > 0 then sleepSeconds(waitFor) else task.wait() end
+    end
+end)
