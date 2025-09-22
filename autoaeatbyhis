@@ -1,0 +1,126 @@
+-- AutoEatClient
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CollectionService = game:GetService("CollectionService")
+
+local player = Players.LocalPlayer
+local AutoEatEvent = ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("AutoEatEvent")
+
+-- asumsi hunger di leaderstats.Hunger
+local function getHunger()
+	local stats = player:FindFirstChild("leaderstats")
+	if not stats then return nil end
+	local h = stats:FindFirstChild("Hunger")
+	return h
+end
+
+-- GUI
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "AutoEatGui"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = player:WaitForChild("PlayerGui")
+
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Size = UDim2.new(0,140,0,40)
+toggleBtn.Position = UDim2.new(0,10,0,10)
+toggleBtn.Text = "Auto-Eat: OFF"
+toggleBtn.Parent = screenGui
+
+local dropdown = Instance.new("TextBox")
+dropdown.Size = UDim2.new(0,140,0,30)
+dropdown.Position = UDim2.new(0,10,0,60)
+dropdown.PlaceholderText = "Food name (ex: Apple)"
+dropdown.Text = ""
+dropdown.Parent = screenGui
+
+local distBox = Instance.new("TextBox")
+distBox.Size = UDim2.new(0,140,0,30)
+distBox.Position = UDim2.new(0,10,0,100)
+distBox.PlaceholderText = "Max distance (ex: 15)"
+distBox.Text = "10"
+distBox.Parent = screenGui
+
+local thresholdBox = Instance.new("TextBox")
+thresholdBox.Size = UDim2.new(0,140,0,30)
+thresholdBox.Position = UDim2.new(0,10,0,140)
+thresholdBox.PlaceholderText = "Hunger % threshold (ex: 40)"
+thresholdBox.Text = "40"
+thresholdBox.Parent = screenGui
+
+-- state
+local enabled = false
+local selectedFood = ""
+local maxDist = 10
+local thresholdPercent = 40 -- default 40%
+
+toggleBtn.MouseButton1Click:Connect(function()
+	enabled = not enabled
+	toggleBtn.Text = "Auto-Eat: " .. (enabled and "ON" or "OFF")
+end)
+
+dropdown.FocusLost:Connect(function()
+	selectedFood = dropdown.Text
+end)
+
+distBox.FocusLost:Connect(function()
+	local n = tonumber(distBox.Text)
+	if n then
+		maxDist = n
+	else
+		maxDist = 10
+		distBox.Text = "10"
+	end
+end)
+
+thresholdBox.FocusLost:Connect(function()
+	local n = tonumber(thresholdBox.Text)
+	if n then
+		thresholdPercent = math.clamp(n, 1, 100)
+	else
+		thresholdPercent = 40
+		thresholdBox.Text = "40"
+	end
+end)
+
+-- efek client-side
+AutoEatEvent.OnClientEvent:Connect(function(action, data)
+	if action == "Ate" then
+		print("You ate:", data.source, "Nutrition:", data.nutrition)
+	end
+end)
+
+-- loop
+task.spawn(function()
+	while true do
+		if enabled then
+			local hunger = getHunger()
+			if hunger then
+				local current = hunger.Value
+				local maxH = hunger.MaxValue or 100 -- kalau Hunger ada MaxValue; kalau tidak anggap 100
+				local percent = (current / maxH) * 100
+
+				if percent <= thresholdPercent then
+					local char = player.Character
+					if char and char:FindFirstChild("HumanoidRootPart") then
+						local hrp = char.HumanoidRootPart
+						local nearest, dist = nil, math.huge
+						for _, food in ipairs(CollectionService:GetTagged("Food")) do
+							if food.PrimaryPart and food.Parent then
+								if selectedFood == "" or food.Name == selectedFood then
+									local d = (hrp.Position - food.PrimaryPart.Position).Magnitude
+									if d < dist and d <= maxDist then
+										nearest, dist = food, d
+									end
+								end
+							end
+						end
+						if nearest then
+							AutoEatEvent:FireServer("EatWorld", {food = nearest, maxDist = maxDist})
+						end
+					end
+				end
+			end
+		end
+		task.wait(1)
+	end
+end)
