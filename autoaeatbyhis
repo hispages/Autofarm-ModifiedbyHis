@@ -1,46 +1,34 @@
--- AutoEatServer
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local CollectionService = game:GetService("CollectionService")
-local Players = game:GetService("Players")
-local RemoteFolder = ReplicatedStorage:WaitForChild("RemoteEvents")
-local AutoEatEvent = RemoteFolder:WaitForChild("AutoEatEvent")
+-- Auto Eat Script (sesuaikan dengan API gamemu)
+local player = game.Players.LocalPlayer
+local hunger = player:WaitForChild("Hunger") -- contoh kalau ada Value Object
 
-local MAX_HUNGER = 100
-local EAT_COOLDOWN = 1.0
-local lastEat = {}
-
-local function getHunger(player)
-	local stats = player:FindFirstChild("leaderstats")
-	if stats then
-		return stats:FindFirstChild("Hunger")
-	end
+local function findFood(inv)
+    -- cari makanan terbaik di inventory player
+    local bestFood
+    for _, item in pairs(inv:GetChildren()) do
+        if item:IsA("Tool") and item:FindFirstChild("Nutrition") then
+            if not bestFood or item.Nutrition.Value > bestFood.Nutrition.Value then
+                bestFood = item
+            end
+        end
+    end
+    return bestFood
 end
 
-AutoEatEvent.OnServerEvent:Connect(function(player, action, data)
-	if action == "EatWorld" then
-		local now = tick()
-		if lastEat[player.UserId] and now - lastEat[player.UserId] < EAT_COOLDOWN then
-			return
-		end
-		lastEat[player.UserId] = now
+local function eatFood()
+    local backpack = player:WaitForChild("Backpack")
+    local food = findFood(backpack)
+    if food then
+        -- contoh mekanisme makan (disesuaikan dengan game kamu)
+        food:Activate()
+        print("Makan:", food.Name)
+    end
+end
 
-		local hunger = getHunger(player)
-		if not hunger then return end
-
-		local food = data and data.food
-		if typeof(food) ~= "Instance" or not food.Parent then return end
-		if not CollectionService:HasTag(food, "Food") then return end
-
-		local char = player.Character
-		if not char or not char:FindFirstChild("HumanoidRootPart") then return end
-		local dist = (char.HumanoidRootPart.Position - food.PrimaryPart.Position).Magnitude
-		if dist > (data.maxDist or 10) then return end
-
-		local nutritionVal = food:FindFirstChild("Nutrition")
-		if not nutritionVal then return end
-		hunger.Value = math.clamp(hunger.Value + nutritionVal.Value, 0, MAX_HUNGER)
-
-		food:Destroy()
-		AutoEatEvent:FireClient(player, "Ate", {source = "World", nutrition = nutritionVal.Value})
-	end
-end)
+-- loop auto makan
+while true do
+    task.wait(1) -- cooldown biar ga spam
+    if hunger.Value >= 70 then -- kalau hunger udah tinggi (lapar)
+        eatFood()
+    end
+end
